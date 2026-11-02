@@ -20,7 +20,7 @@ export default function ChatPage() {
     sessionId.current = crypto.randomUUID();
     fetch("/api/health")
       .then((r) => r.json())
-      .then((d) => setModel(d.llm_model))
+      .then((d) => setModel(d.data.llm_model))
       .catch(() => setModel("backend 연결 실패"));
   }, []);
 
@@ -36,18 +36,57 @@ export default function ChatPage() {
     setInput("");
     setLoading(true);
 
+    // 스트리밍 중인 AI 말풍선 상태
+    let started = false;
+    let acc = "";
+    let tools: string[] = [];
+    const patchLast = () =>
+      setMessages((prev) => {
+        const copy = [...prev];
+        copy[copy.length - 1] = { role: "ai", content: acc, toolsUsed: tools };
+        return copy;
+      });
+    const ensureBubble = () => {
+      if (!started) {
+        started = true;
+        setMessages((prev) => [...prev, { role: "ai", content: "" }]);
+      }
+    };
+
     try {
-      const res = await fetch("/api/chat", {
+      const res = await fetch("/api/chat/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ session_id: sessionId.current, message: text }),
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      setMessages((prev) => [
-        ...prev,
-        { role: "ai", content: data.reply, toolsUsed: data.tools_used },
-      ]);
+      if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const parts = buffer.split("\n\n");
+        buffer = parts.pop() ?? "";
+        for (const part of parts) {
+          const line = part.trim();
+          if (!line.startsWith("data:")) continue;
+          const evt = JSON.parse(line.slice(5));
+          if (evt.type === "token") {
+            ensureBubble();
+            acc += evt.content;
+            patchLast();
+          } else if (evt.type === "tool") {
+            ensureBubble();
+            tools = [...tools, evt.name];
+            patchLast();
+          } else if (evt.type === "error") {
+            throw new Error(evt.message);
+          }
+        }
+      }
     } catch (e) {
       setMessages((prev) => [
         ...prev,
@@ -81,7 +120,9 @@ export default function ChatPage() {
             )}
           </div>
         ))}
-        {loading && <div className="bubble ai">생각 중…</div>}
+        {loading && messages[messages.length - 1]?.role === "user" && (
+          <div className="bubble ai">생각 중…</div>
+        )}
         <div ref={bottomRef} />
       </section>
 

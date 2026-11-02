@@ -1,4 +1,26 @@
+from typing import Generic, TypeVar
+
 from pydantic import BaseModel, Field
+
+T = TypeVar("T")
+
+
+class CommonResponse(BaseModel, Generic[T]):
+    """모든 API 응답의 공통 envelope."""
+
+    success: bool = True
+    code: str = "OK"
+    message: str = ""
+    data: T | None = None
+
+    @classmethod
+    def ok(cls, data: T) -> "CommonResponse[T]":
+        return cls(data=data)
+
+
+class HealthData(BaseModel):
+    status: str
+    llm_model: str
 
 
 class ChatRequest(BaseModel):

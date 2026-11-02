@@ -1,12 +1,23 @@
+import json
 from contextlib import asynccontextmanager
+from typing import Any, AsyncIterator
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from langchain_core.messages import AIMessage, HumanMessage
+from fastapi.responses import StreamingResponse
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from app.config import settings
+from app.errors import AppException, ErrorCode, register_exception_handlers
 from app.graph import build_graph
-from app.schemas import ChatRequest, ChatResponse, HistoryMessage, HistoryResponse
+from app.schemas import (
+    ChatRequest,
+    ChatResponse,
+    CommonResponse,
+    HealthData,
+    HistoryMessage,
+    HistoryResponse,
+)
 
 
 @asynccontextmanager
@@ -17,6 +28,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="LLM Wrapper Service", lifespan=lifespan)
 
+register_exception_handlers(app)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
@@ -26,16 +39,15 @@ app.add_middleware(
 )
 
 
-@app.get("/api/health")
-async def health() -> dict:
-    return {
-        "status": "ok",
-        "llm_model": settings.llm_model or "(echo stub)",
-    }
+@app.get("/api/health", response_model=CommonResponse[HealthData])
+async def health() -> CommonResponse[HealthData]:
+    return CommonResponse.ok(
+        HealthData(status="ok", llm_model=settings.llm_model or "(echo stub)")
+    )
 
 
-@app.post("/api/chat", response_model=ChatResponse)
-async def chat(req: ChatRequest) -> ChatResponse:
+@app.post("/api/chat", response_model=CommonResponse[ChatResponse])
+async def chat(req: ChatRequest) -> CommonResponse[ChatResponse]:
     graph = app.state.graph
     config = {"configurable": {"thread_id": req.session_id}}
 
@@ -43,8 +55,8 @@ async def chat(req: ChatRequest) -> ChatResponse:
         result = await graph.ainvoke(
             {"messages": [HumanMessage(content=req.message)]}, config
         )
-    except Exception as e:  # LLM/도구 호출 실패를 클라이언트에 전달
-        raise HTTPException(status_code=502, detail=f"LLM 호출 실패: {e}") from e
+    except Exception as e:  # LLM/도구 호출 실패 → 전역 핸들러가 502로 변환
+        raise AppException(ErrorCode.LLM_SERVICE_ERROR, str(e)) from e
 
     messages = result["messages"]
     reply = next(
@@ -64,11 +76,66 @@ async def chat(req: ChatRequest) -> ChatResponse:
         if isinstance(m, AIMessage):
             tools_used = [tc["name"] for tc in m.tool_calls] + tools_used
 
-    return ChatResponse(session_id=req.session_id, reply=reply, tools_used=tools_used)
+    return CommonResponse.ok(
+        ChatResponse(session_id=req.session_id, reply=reply, tools_used=tools_used)
+    )
 
 
-@app.get("/api/history/{session_id}", response_model=HistoryResponse)
-async def history(session_id: str) -> HistoryResponse:
+def _chunk_text(content: Any) -> str:
+    """메시지 청크 content에서 텍스트만 추출 (provider별 list 형식 대응)."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "".join(
+            p.get("text", "")
+            for p in content
+            if isinstance(p, dict) and p.get("type") == "text"
+        )
+    return ""
+
+
+@app.post("/api/chat/stream")
+async def chat_stream(req: ChatRequest) -> StreamingResponse:
+    """SSE 스트리밍 응답. 이벤트: token / tool / done / error"""
+    graph = app.state.graph
+    config = {"configurable": {"thread_id": req.session_id}}
+
+    def sse(payload: dict) -> str:
+        return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+    async def event_stream() -> AsyncIterator[str]:
+        try:
+            async for chunk, _metadata in graph.astream(
+                {"messages": [HumanMessage(content=req.message)]},
+                config,
+                stream_mode="messages",
+            ):
+                if isinstance(chunk, ToolMessage):
+                    yield sse({"type": "tool", "name": chunk.name})
+                elif isinstance(chunk, AIMessage):
+                    text = _chunk_text(chunk.content)
+                    if text:
+                        yield sse({"type": "token", "content": text})
+            yield sse({"type": "done"})
+        except Exception as e:
+            exc = AppException(ErrorCode.LLM_SERVICE_ERROR, str(e))  # 로깅 포함
+            yield sse(
+                {
+                    "type": "error",
+                    "code": exc.error_code.code,
+                    "message": exc.message,
+                }
+            )
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.get("/api/history/{session_id}", response_model=CommonResponse[HistoryResponse])
+async def history(session_id: str) -> CommonResponse[HistoryResponse]:
     graph = app.state.graph
     state = await graph.aget_state({"configurable": {"thread_id": session_id}})
     messages = [
@@ -76,4 +143,4 @@ async def history(session_id: str) -> HistoryResponse:
         for m in state.values.get("messages", [])
         if m.type in ("human", "ai") and m.content
     ]
-    return HistoryResponse(session_id=session_id, messages=messages)
+    return CommonResponse.ok(HistoryResponse(session_id=session_id, messages=messages))

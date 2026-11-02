@@ -9,12 +9,13 @@ FastAPI backend + Next.js frontend, 멀티턴 대화 지원.
 llm-wrapper-service/
 ├── backend/                  # FastAPI + LangGraph (uv, Python 3.11.11)
 │   ├── app/
-│   │   ├── main.py           # FastAPI 엔트리포인트 (/api/chat, /api/history, /api/health)
+│   │   ├── main.py           # FastAPI 엔트리포인트 (/api/chat, /api/chat/stream(SSE), /api/history, /api/health)
 │   │   ├── graph.py          # LangGraph 에이전트 그래프 (agent ↔ tools 루프)
 │   │   ├── llm.py            # 모델 팩토리 (LLM_MODEL env로 교체, 미설정 시 echo 스텁)
 │   │   ├── tools.py          # tool-calling 도구 (현재 시간, 계산기 — 교체/추가 지점)
+│   │   ├── errors.py         # ErrorCode enum · AppException · 전역 예외 핸들러
 │   │   ├── config.py         # 환경변수 설정
-│   │   └── schemas.py        # 요청/응답 모델
+│   │   └── schemas.py        # CommonResponse envelope 및 요청/응답 모델
 │   └── tests/
 └── frontend/                 # Next.js (App Router) 채팅 UI
     └── app/page.tsx          # /api/* 는 next.config.mjs rewrites로 backend에 프록시
