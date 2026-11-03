@@ -3,6 +3,25 @@ import pytest
 from app.db import get_catalog_doc, get_conn, get_table_details_doc, run_select
 
 
+def test_unknown_backend_rejected(monkeypatch):
+    from app import db
+
+    monkeypatch.setattr(db.settings, "db_backend", "mysql")
+    monkeypatch.setattr(db, "_backend", None)
+    with pytest.raises(ValueError, match="지원하지 않는 DB_BACKEND"):
+        db.get_backend()
+
+
+def test_oracle_backend_requires_connection_config(monkeypatch):
+    from app import db
+
+    monkeypatch.setattr(db.settings, "db_backend", "oracle")
+    monkeypatch.setattr(db.settings, "oracle_dsn", "")
+    monkeypatch.setattr(db, "_backend", None)
+    with pytest.raises(RuntimeError, match="ORACLE_DSN"):
+        db.get_backend()
+
+
 def test_catalog_contains_tables_and_relations():
     doc = get_catalog_doc()
     for name in ("customers", "products", "orders"):

@@ -1,0 +1,9 @@
+# ── 공통 기본값 (모든 프로필에 적용) ──────────────────────────
+# 우선순위: 환경변수 > .env > application-{profile}.yml > 이 파일 > 코드 기본값
+# 시크릿(API 키, DB 비밀번호)은 여기에 쓰지 않는다 — 환경변수(Secret)로 주입.
+
+db_backend: duckdb
+llm_debug: false
+
+cors_origins:
+  - http://localhost:3000

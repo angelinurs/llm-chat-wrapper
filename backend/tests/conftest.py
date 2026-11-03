@@ -8,3 +8,4 @@
 import os
 
 os.environ["LLM_MODEL"] = ""
+os.environ["DB_BACKEND"] = "duckdb"  # 단위 테스트는 외부 의존 없는 DuckDB 로 고정

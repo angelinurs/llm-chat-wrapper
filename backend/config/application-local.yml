@@ -1,0 +1,4 @@
+# ── local 프로필 (기본 프로필) ────────────────────────────────
+# APP_PROFILE 미지정 시 적용. dev 환경: DuckDB 대역 사용.
+
+db_backend: duckdb

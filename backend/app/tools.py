@@ -73,7 +73,9 @@ def get_table_details(tables: list[str]) -> str:
 
 @tool
 def run_sql(query: str) -> str:
-    """분석 DB에서 SELECT 쿼리를 실행한다 (DuckDB SQL, 읽기 전용, 최대 50행).
+    """분석 DB에서 SELECT 쿼리를 실행한다 (읽기 전용, 최대 50행).
+
+    SQL 방언은 list_tables 카탈로그에 표시된 DB 종류를 따를 것.
 
     결과는 {"columns": [...], "rows": [[...]], "truncated": bool} JSON 문자열.
     집계·조인·정렬은 SQL 로 수행하고, 원본 전체를 가져오지 말 것.

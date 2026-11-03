@@ -155,3 +155,37 @@ LLM_DEBUG=true
 서버 재시작 후 매 LLM 호출의 입출력이 콘솔에 전부 출력됩니다 (출력이 많으니
 디버깅할 때만). 더 제대로 보려면 LangSmith(환경변수 2줄) 같은 트레이싱 도구를
 연결하면 호출 트리를 웹 UI에서 볼 수 있습니다.
+
+## 8. 분석 DB 백엔드 전환 (DuckDB ↔ Oracle)
+
+분석 DB는 `DB_BACKEND` 환경변수로 구현이 갈립니다. tool/그래프/프론트 코드는
+어느 쪽이 꽂혀 있는지 모릅니다 (동일 인터페이스).
+
+**설정 프로필 (Spring 의 profiles 대응)** — `config/application.yml`(공통) 위에
+`application-{profile}.yml` 이 덮어쓰입니다. 우선순위:
+환경변수 > .env > 프로필 yml > 공통 yml > 코드 기본값.
+
+```bash
+# 기본(local 프로필): DuckDB in-memory (마이그레이션·시드 자동 적용)
+uv run uvicorn app.main:app --reload
+
+# prod 프로필: application-prod.yml 적용 → Oracle 백엔드
+# 접속 정보는 yml 이 아니라 환경변수(Secret)로 주입
+APP_PROFILE=prod ORACLE_DSN=host:1521/SVC ORACLE_USER=ro ORACLE_PASSWORD=... \
+  uv run uvicorn app.main:app
+
+# 프로필과 무관하게 환경변수로 개별 설정을 덮어쓸 수도 있음
+DB_BACKEND=oracle ORACLE_DSN=... uv run uvicorn app.main:app
+```
+
+| | duckdb (기본) | oracle |
+| --- | --- | --- |
+| 용도 | dev/테스트 대역 | 프로덕션 |
+| 스키마 카탈로그 | 코드의 설명 dict | 데이터 딕셔너리 (TABLE/COLUMN COMMENT, FK 제약) 자동 생성 |
+| 행수 제한 | `LIMIT` 래핑 | `FETCH FIRST n ROWS ONLY` 래핑 |
+| 필요 패키지 | 기본 포함 | `uv sync --extra oracle` |
+
+프로덕션(k8s)에서는 `ORACLE_*` 변수를 Secret 으로 주입하면 됩니다.
+Oracle 카탈로그 품질은 DB 에 달린 COMMENT 충실도에 비례하므로,
+테이블·컬럼 주석을 잘 달아두는 것이 text-to-SQL 정확도의 핵심입니다.
+pytest 는 `conftest.py`가 항상 DuckDB 로 고정하므로 Oracle 없이 돌 수 있습니다.
