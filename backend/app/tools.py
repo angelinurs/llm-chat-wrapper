@@ -4,11 +4,14 @@
 """
 
 import ast
+import json
 import operator
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from langchain_core.tools import tool
+
+from app.db import get_schema_doc, run_select
 
 _OPS = {
     ast.Add: operator.add,
@@ -50,4 +53,24 @@ def calculate(expression: str) -> str:
         return f"계산할 수 없는 수식입니다: {expression}"
 
 
-TOOLS = [get_current_time, calculate]
+@tool
+def get_schema() -> str:
+    """분석 DB의 테이블 스키마·컬럼 설명·조인 관계를 조회한다. SQL 작성 전에 반드시 먼저 호출할 것."""
+    return get_schema_doc()
+
+
+@tool
+def run_sql(query: str) -> str:
+    """분석 DB에서 SELECT 쿼리를 실행한다 (DuckDB SQL, 읽기 전용, 최대 50행).
+
+    결과는 {"columns": [...], "rows": [[...]], "truncated": bool} JSON 문자열.
+    집계·조인·정렬은 SQL 로 수행하고, 원본 전체를 가져오지 말 것.
+    """
+    try:
+        result = run_select(query)
+    except Exception as e:
+        return f"SQL 실행 실패: {e}"
+    return json.dumps(result, ensure_ascii=False)
+
+
+TOOLS = [get_current_time, calculate, get_schema, run_sql]

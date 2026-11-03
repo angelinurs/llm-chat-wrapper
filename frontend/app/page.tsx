@@ -1,11 +1,23 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+
+// SSE 는 Next rewrites 프록시가 버퍼링하므로 backend 로 직접 요청한다
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
+
+type TableData = {
+  columns: string[];
+  rows: (string | number | boolean | null)[][];
+  truncated?: boolean;
+};
 
 type Message = {
   role: "user" | "ai";
   content: string;
   toolsUsed?: string[];
+  tables?: TableData[];
 };
 
 export default function ChatPage() {
@@ -40,10 +52,16 @@ export default function ChatPage() {
     let started = false;
     let acc = "";
     let tools: string[] = [];
+    let tables: TableData[] = [];
     const patchLast = () =>
       setMessages((prev) => {
         const copy = [...prev];
-        copy[copy.length - 1] = { role: "ai", content: acc, toolsUsed: tools };
+        copy[copy.length - 1] = {
+          role: "ai",
+          content: acc,
+          toolsUsed: tools,
+          tables,
+        };
         return copy;
       });
     const ensureBubble = () => {
@@ -54,7 +72,7 @@ export default function ChatPage() {
     };
 
     try {
-      const res = await fetch("/api/chat/stream", {
+      const res = await fetch(`${API_BASE}/api/chat/stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ session_id: sessionId.current, message: text }),
@@ -81,6 +99,13 @@ export default function ChatPage() {
           } else if (evt.type === "tool") {
             ensureBubble();
             tools = [...tools, evt.name];
+            patchLast();
+          } else if (evt.type === "table") {
+            ensureBubble();
+            tables = [
+              ...tables,
+              { columns: evt.columns, rows: evt.rows, truncated: evt.truncated },
+            ];
             patchLast();
           } else if (evt.type === "error") {
             throw new Error(evt.message);
@@ -114,7 +139,42 @@ export default function ChatPage() {
         )}
         {messages.map((m, i) => (
           <div key={i} style={{ display: "contents" }}>
-            <div className={`bubble ${m.role}`}>{m.content}</div>
+            <div className={`bubble ${m.role}`}>
+              {m.tables?.map((t, ti) => (
+                <div key={ti} className="table-wrap">
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        {t.columns.map((c, ci) => (
+                          <th key={ci}>{c}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {t.rows.map((r, ri) => (
+                        <tr key={ri}>
+                          {r.map((v, vi) => (
+                            <td key={vi}>{v === null ? "-" : String(v)}</td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {t.truncated && (
+                    <div className="table-note">일부 행만 표시됨 (최대 50행)</div>
+                  )}
+                </div>
+              ))}
+              {m.role === "ai" ? (
+                <div className="md">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                    {m.content}
+                  </ReactMarkdown>
+                </div>
+              ) : (
+                m.content
+              )}
+            </div>
             {m.toolsUsed && m.toolsUsed.length > 0 && (
               <span className="tools-note">🔧 사용된 도구: {m.toolsUsed.join(", ")}</span>
             )}

@@ -8,6 +8,7 @@ from fastapi.responses import StreamingResponse
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from app.config import settings
+from app.db import init_db
 from app.errors import AppException, ErrorCode, register_exception_handlers
 from app.graph import build_graph
 from app.schemas import (
@@ -22,6 +23,7 @@ from app.schemas import (
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    init_db()  # DuckDB 생성 + Flyway 식 마이그레이션 적용
     app.state.graph = build_graph()
     yield
 
@@ -112,6 +114,14 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
             ):
                 if isinstance(chunk, ToolMessage):
                     yield sse({"type": "tool", "name": chunk.name})
+                    # run_sql 결과는 LLM 을 거치지 않고 즉시 표로 전달
+                    if chunk.name == "run_sql":
+                        try:
+                            data = json.loads(chunk.content)
+                        except (json.JSONDecodeError, TypeError):
+                            data = None
+                        if isinstance(data, dict) and "columns" in data:
+                            yield sse({"type": "table", **data})
                 elif isinstance(chunk, AIMessage):
                     text = _chunk_text(chunk.content)
                     if text:
