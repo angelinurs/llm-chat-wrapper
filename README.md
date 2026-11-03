@@ -12,10 +12,12 @@ llm-wrapper-service/
 │   │   ├── main.py           # FastAPI 엔트리포인트 (/api/chat, /api/chat/stream(SSE), /api/history, /api/health)
 │   │   ├── graph.py          # LangGraph 에이전트 그래프 (agent ↔ tools 루프)
 │   │   ├── llm.py            # 모델 팩토리 (LLM_MODEL env로 교체, 미설정 시 echo 스텁)
-│   │   ├── tools.py          # tool-calling 도구 (현재 시간, 계산기 — 교체/추가 지점)
+│   │   ├── tools.py          # tool-calling 도구 (시계·계산기·스키마 조회·SQL 실행)
+│   │   ├── db.py             # DuckDB 분석 DB + Flyway 식 마이그레이션 러너 + 스키마 카탈로그
 │   │   ├── errors.py         # ErrorCode enum · AppException · 전역 예외 핸들러
 │   │   ├── config.py         # 환경변수 설정
 │   │   └── schemas.py        # CommonResponse envelope 및 요청/응답 모델
+│   ├── migrations/           # V1__*.sql 형식의 버전 마이그레이션 (기동 시 자동 적용)
 │   └── tests/
 └── frontend/                 # Next.js (App Router) 채팅 UI
     └── app/page.tsx          # /api/* 는 next.config.mjs rewrites로 backend에 프록시

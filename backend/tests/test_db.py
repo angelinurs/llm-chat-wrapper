@@ -1,6 +1,26 @@
 import pytest
 
-from app.db import get_conn, run_select
+from app.db import get_catalog_doc, get_conn, get_table_details_doc, run_select
+
+
+def test_catalog_contains_tables_and_relations():
+    doc = get_catalog_doc()
+    for name in ("customers", "products", "orders"):
+        assert name in doc
+    assert "orders.customer_id → customers.id" in doc  # 관계 지도 포함
+
+
+def test_table_details_selected_only():
+    doc = get_table_details_doc(["orders", "customers"])
+    assert "테이블: orders" in doc
+    assert "테이블: customers" in doc
+    assert "테이블: products" not in doc  # 요청 안 한 테이블은 제외
+
+
+def test_table_details_unknown_table():
+    doc = get_table_details_doc(["no_such_table"])
+    assert "존재하지 않는 테이블" in doc
+    assert "no_such_table" in doc
 
 
 def test_migrations_applied():

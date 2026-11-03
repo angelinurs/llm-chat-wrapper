@@ -19,35 +19,65 @@ logger = logging.getLogger("app")
 MIGRATIONS_DIR = Path(__file__).resolve().parent.parent / "migrations"
 MAX_ROWS = 50  # LLM/화면에 전달할 최대 행수
 
-# LLM 에게 제공하는 스키마 상세 설명 (프로덕션에서는 Oracle 딕셔너리/COMMENT 로 대체)
-SCHEMA_DOC = """\
-[분석 DB 스키마 — DuckDB SQL 사용]
+# ── 2단계 스키마 조회 ─────────────────────────────────────────
+# 1단계 카탈로그: 테이블 한 줄 설명 + 관계 지도 (작아서 항상 제공 가능)
+# 2단계 상세:     요청된 테이블만 컬럼·타입·의미 설명
+# 프로덕션(Oracle)에서는 ALL_TAB_COMMENTS / ALL_COL_COMMENTS / FK 제약 조회로 대체.
 
+TABLE_CATALOG: dict[str, str] = {
+    "customers": "고객 마스터 (이름, 등급 VIP/GOLD/SILVER, 거주 도시, 가입일)",
+    "products": "상품 마스터 (상품명, 카테고리 전자/식품/의류, 단가)",
+    "orders": "주문 내역 (고객·상품별 수량, 결제 금액, 주문일)",
+}
+
+RELATION_MAP = """\
+orders.customer_id → customers.id  (고객 1 : N 주문)
+orders.product_id  → products.id   (상품 1 : N 주문)"""
+
+TABLE_DETAILS: dict[str, str] = {
+    "customers": """\
 테이블: customers (고객)
   - id INTEGER PK
   - name VARCHAR          : 고객 이름
   - grade VARCHAR         : 등급 ('VIP' | 'GOLD' | 'SILVER')
   - city VARCHAR          : 거주 도시
-  - created_at DATE       : 가입일
-
+  - created_at DATE       : 가입일""",
+    "products": """\
 테이블: products (상품)
   - id INTEGER PK
   - name VARCHAR          : 상품명
   - category VARCHAR      : 카테고리 ('전자' | '식품' | '의류')
-  - price INTEGER         : 단가(원)
-
+  - price INTEGER         : 단가(원)""",
+    "orders": """\
 테이블: orders (주문)
   - id INTEGER PK
   - customer_id INTEGER   : FK → customers.id
   - product_id INTEGER    : FK → products.id
   - quantity INTEGER      : 수량
-  - amount INTEGER        : 결제 금액(원)
-  - order_date DATE       : 주문일
+  - amount INTEGER        : 결제 금액(원) = 단가 * 수량
+  - order_date DATE       : 주문일""",
+}
 
-관계:
-  orders.customer_id → customers.id  (고객 1 : N 주문)
-  orders.product_id  → products.id   (상품 1 : N 주문)
-"""
+
+def get_catalog_doc() -> str:
+    """1단계: 테이블 카탈로그 + 관계 지도."""
+    lines = ["[테이블 카탈로그 — DuckDB SQL 사용]"]
+    lines += [f"- {name} : {desc}" for name, desc in TABLE_CATALOG.items()]
+    lines += ["", "[관계 지도]", RELATION_MAP]
+    return "\n".join(lines)
+
+
+def get_table_details_doc(tables: list[str]) -> str:
+    """2단계: 요청된 테이블들의 컬럼 상세. 모르는 이름은 안내 문구로 응답."""
+    known = [t for t in tables if t in TABLE_DETAILS]
+    unknown = [t for t in tables if t not in TABLE_DETAILS]
+    parts = [TABLE_DETAILS[t] for t in known]
+    if unknown:
+        parts.append(
+            f"(존재하지 않는 테이블: {', '.join(unknown)} — "
+            f"사용 가능한 테이블: {', '.join(TABLE_DETAILS)})"
+        )
+    return "\n\n".join(parts) if parts else "요청된 테이블이 없습니다."
 
 _conn: duckdb.DuckDBPyConnection | None = None
 _lock = threading.Lock()

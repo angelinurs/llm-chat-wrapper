@@ -23,6 +23,10 @@ from app.schemas import (
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    if settings.llm_debug:  # LLM 입출력 전문을 콘솔에 출력 (개발용)
+        from langchain.globals import set_debug
+
+        set_debug(True)
     init_db()  # DuckDB 생성 + Flyway 식 마이그레이션 적용
     app.state.graph = build_graph()
     yield

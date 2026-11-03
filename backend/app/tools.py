@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 
 from langchain_core.tools import tool
 
-from app.db import get_schema_doc, run_select
+from app.db import get_catalog_doc, get_table_details_doc, run_select
 
 _OPS = {
     ast.Add: operator.add,
@@ -54,9 +54,21 @@ def calculate(expression: str) -> str:
 
 
 @tool
-def get_schema() -> str:
-    """분석 DB의 테이블 스키마·컬럼 설명·조인 관계를 조회한다. SQL 작성 전에 반드시 먼저 호출할 것."""
-    return get_schema_doc()
+def list_tables() -> str:
+    """분석 DB의 테이블 카탈로그(테이블별 한 줄 설명)와 조인 관계 지도를 조회한다.
+
+    데이터 질문을 받으면 가장 먼저 호출해, 답변에 필요한 테이블들을 고를 것.
+    """
+    return get_catalog_doc()
+
+
+@tool
+def get_table_details(tables: list[str]) -> str:
+    """지정한 테이블들의 컬럼 상세(타입·의미 설명)를 조회한다.
+
+    list_tables 로 고른, SQL 에 사용할 테이블만 요청할 것. 예: ["orders", "customers"]
+    """
+    return get_table_details_doc(tables)
 
 
 @tool
@@ -73,4 +85,4 @@ def run_sql(query: str) -> str:
     return json.dumps(result, ensure_ascii=False)
 
 
-TOOLS = [get_current_time, calculate, get_schema, run_sql]
+TOOLS = [get_current_time, calculate, list_tables, get_table_details, run_sql]
