@@ -118,7 +118,7 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
             ):
                 if isinstance(chunk, ToolMessage):
                     yield sse({"type": "tool", "name": chunk.name})
-                    # run_sql 결과는 LLM 을 거치지 않고 즉시 표로 전달
+                    # SQL 결과는 LLM 을 거치지 않고 즉시 표로 전달
                     if chunk.name == "run_sql":
                         try:
                             data = json.loads(chunk.content)
@@ -126,6 +126,15 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
                             data = None
                         if isinstance(data, dict) and "columns" in data:
                             yield sse({"type": "table", **data})
+                    elif chunk.name == "parallel_sql":  # 병렬 실행 결과 묶음
+                        try:
+                            items = json.loads(chunk.content)
+                        except (json.JSONDecodeError, TypeError):
+                            items = None
+                        for item in items if isinstance(items, list) else []:
+                            result = item.get("result")
+                            if isinstance(result, dict) and "columns" in result:
+                                yield sse({"type": "table", **result})
                 elif isinstance(chunk, AIMessage):
                     text = _chunk_text(chunk.content)
                     if text:

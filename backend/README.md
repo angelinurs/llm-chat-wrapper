@@ -13,12 +13,17 @@ FastAPI + LangGraph로 만든 채팅 API 서버입니다.
 [FastAPI]  ──  HTTP 요청을 받는 창구 (main.py)
     │
     ▼
-[LangGraph 그래프]  ──  "생각 → 도구 사용 → 다시 생각" 반복 (graph.py)
-    │                      │
-    │                      ├── agent 노드: LLM에게 물어봄 (llm.py)
-    │                      └── tools 노드: 도구 실행 (tools.py)
-    │                             ├─ 시계, 계산기
-    │                             └─ 스키마 조회 + SQL 실행 ──▶ [DuckDB 분석 DB] (db.py)
+[LangGraph 그래프] (graph.py)
+    │
+    agent 노드 (LLM 호출, llm.py) ──┬─ 일반 tool call ──▶ tools 노드 ──▶ agent 로 복귀
+    │                               │     (시계·계산기·스키마 조회·run_sql)
+    │                               │
+    │                               ├─ parallel_sql ──▶ sql_worker × N  ──▶ collect ──▶ agent
+    │                               │     (Send API 로 쿼리별 worker 병렬 실행 후 합침)
+    │                               │
+    │                               └─ tool call 없음 ──▶ 종료
+    │
+    분석 쿼리는 전부 [분석 DB] 로 (db.py — DuckDB 또는 Oracle)
     ▼
 답변을 SSE 스트리밍으로 반환 (표 데이터는 table 이벤트로 즉시 전달)
 ```
@@ -39,7 +44,7 @@ backend/
 │   ├── main.py           # ① 시작점. API 엔드포인트 + SSE 스트리밍 (가장 먼저 읽을 파일)
 │   ├── config.py         # ② 설정. .env 를 읽어 설정값으로 만듦 (LLM_MODEL, LLM_DEBUG 등)
 │   ├── schemas.py        # ③ 데이터 모양 정의. CommonResponse envelope, 요청/응답 형식
-│   ├── graph.py          # ④ 핵심 로직. LangGraph 에이전트 루프 조립 + 멀티턴 체크포인터
+│   ├── graph.py          # ④ 핵심 로직. 에이전트 루프 + 병렬 fan-out(Send) + 멀티턴 체크포인터
 │   ├── llm.py            # ⑤ 모델 공장. 어떤 LLM을 쓸지 결정 (미설정 시 echo 스텁)
 │   ├── tools.py          # ⑥ 도구 모음. LLM이 호출하는 함수들
 │   ├── db.py             # ⑦ 분석 DB. DuckDB + 마이그레이션 러너 + 스키마 카탈로그
@@ -102,7 +107,7 @@ SSE 스트림은 이벤트 단위 JSON 입니다:
 | `{"type": "table", "columns": [...], "rows": [...]}` | SQL 결과 표 (LLM을 거치지 않고 즉시 전달) |
 | `{"type": "done"}` / `{"type": "error", ...}` | 종료 / 실패 |
 
-## 5. 꼭 알아야 할 개념 4가지
+## 5. 꼭 알아야 할 개념 5가지
 
 **① 멀티턴 (대화 기억)**
 같은 `session_id`로 요청하면 이전 대화를 기억합니다.
@@ -128,7 +133,16 @@ SSE 스트림은 이벤트 단위 JSON 입니다:
 스스로 고쳐 재시도합니다. 결과 표는 LLM을 거치지 않고 `table` 이벤트로
 화면에 바로 전달됩니다 (토큰 절약 + 숫자 환각 방지).
 
-**④ 에러 처리 흐름**
+**④ 병렬 SQL 실행 (Send fan-out)**
+독립적인 조회가 여러 개면 모델이 `parallel_sql(queries=[...])` 하나로 쿼리
+목록을 제출합니다. 그래프 라우터가 이를 가로채 **쿼리마다 worker 를
+`Send` 로 병렬 생성**해 동시에 실행하고(`sql_worker`), `collect` 노드가
+결과를 요청 순서대로 합쳐 모델에 돌려줍니다. 쿼리 하나가 실패해도 에러만
+담겨 전달되므로 나머지 결과는 살아 있고, 표들은 각각 `table` 이벤트로 화면에
+즉시 꽂힙니다. 모델이 알아서 여러 tool call 을 내는 경우(ToolNode 기본 병렬)와
+달리, 이 경로는 **코드가 병렬을 보장**합니다.
+
+**⑤ 에러 처리 흐름**
 어디서든 예외가 나면 → `errors.py`의 전역 핸들러가 잡아서 →
 CommonResponse 형식으로 바꿔 응답합니다. 새 에러 종류는 `ErrorCode` enum에
 한 줄 추가하고 `raise AppException(ErrorCode.XXX, "설명")` 하면 끝입니다.

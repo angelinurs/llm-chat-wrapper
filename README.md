@@ -10,7 +10,7 @@ llm-wrapper-service/
 ├── backend/                  # FastAPI + LangGraph (uv, Python 3.11.11)
 │   ├── app/
 │   │   ├── main.py           # FastAPI 엔트리포인트 (/api/chat, /api/chat/stream(SSE), /api/history, /api/health)
-│   │   ├── graph.py          # LangGraph 에이전트 그래프 (agent ↔ tools 루프)
+│   │   ├── graph.py          # LangGraph 에이전트 그래프 (agent ↔ tools 루프 + Send 병렬 fan-out)
 │   │   ├── llm.py            # 모델 팩토리 (LLM_MODEL env로 교체, 미설정 시 echo 스텁)
 │   │   ├── tools.py          # tool-calling 도구 (시계·계산기·스키마 조회·SQL 실행)
 │   │   ├── db.py             # DuckDB 분석 DB + Flyway 식 마이그레이션 러너 + 스키마 카탈로그

@@ -87,4 +87,24 @@ def run_sql(query: str) -> str:
     return json.dumps(result, ensure_ascii=False)
 
 
-TOOLS = [get_current_time, calculate, list_tables, get_table_details, run_sql]
+@tool
+def parallel_sql(queries: list[str]) -> str:
+    """서로 독립적인 SELECT 쿼리 여러 개를 병렬로 동시에 실행한다.
+
+    두 개 이상의 독립적인 조회(예: 표1용·표2용)가 필요하면 run_sql 을
+    반복 호출하지 말고 이 도구를 단독으로 한 번 호출할 것 (다른 도구와
+    동시 호출 금지). 각 쿼리 규칙은 run_sql 과 동일 (SELECT 전용, 최대 50행,
+    방언은 list_tables 카탈로그 표기를 따름).
+    """
+    # 실제 실행은 그래프의 sql_worker 노드들이 병렬로 담당한다 (graph.py)
+    return "(그래프에서 병렬 실행됨)"
+
+
+TOOLS = [
+    get_current_time,
+    calculate,
+    list_tables,
+    get_table_details,
+    run_sql,
+    parallel_sql,
+]
